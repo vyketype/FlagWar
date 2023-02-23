@@ -28,21 +28,19 @@ import com.palmergames.bukkit.towny.event.town.TownLeaveEvent;
 import com.palmergames.bukkit.towny.event.town.TownPreSetHomeBlockEvent;
 import com.palmergames.bukkit.towny.event.town.TownPreUnclaimCmdEvent;
 import com.palmergames.bukkit.towny.exceptions.NotRegisteredException;
-import com.palmergames.bukkit.towny.object.Nation;
-import com.palmergames.bukkit.towny.object.Resident;
-import com.palmergames.bukkit.towny.object.Town;
-import com.palmergames.bukkit.towny.object.TownBlock;
-import com.palmergames.bukkit.towny.object.TransactionType;
-import com.palmergames.bukkit.towny.object.WorldCoord;
+import com.palmergames.bukkit.towny.exceptions.TownyException;
+import com.palmergames.bukkit.towny.object.*;
 import io.github.townyadvanced.flagwar.FlagWar;
 import io.github.townyadvanced.flagwar.FlagWarAPI;
 import io.github.townyadvanced.flagwar.config.FlagWarConfig;
 import io.github.townyadvanced.flagwar.events.CellAttackCanceledEvent;
 import io.github.townyadvanced.flagwar.events.CellAttackEvent;
-import io.github.townyadvanced.flagwar.i18n.Translate;
-import io.github.townyadvanced.flagwar.objects.CellUnderAttack;
 import io.github.townyadvanced.flagwar.events.CellDefendedEvent;
 import io.github.townyadvanced.flagwar.events.CellWonEvent;
+import io.github.townyadvanced.flagwar.i18n.Translate;
+import io.github.townyadvanced.flagwar.objects.CellUnderAttack;
+import org.bukkit.Bukkit;
+import org.bukkit.ChatColor;
 import org.bukkit.entity.Player;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
@@ -162,6 +160,52 @@ public class FlagWarCustomListener implements Listener {
 
             FlagWar.townFlagged(defendingTown);
 
+            // VYKETYPE AUTHORSHIP START ----------------------------------------------------------------
+
+            if (defendingTown.getHomeBlock() == townBlock) {
+                // Transfer all claims
+                for (TownBlock block : defendingTown.getTownBlocks()) {
+                    transferOrUnclaimOrKeepTownblock(attackingTown, block, defendingTown);
+                    towny.updateCache(worldCoord);
+                }
+
+                // Send custom message
+                Bukkit.broadcastMessage(ChatColor.AQUA + "The capital chunk was lost, therefore the " +
+                    "entire defending town has lost.");
+
+                Nation defendingNation = defendingTown.getNation();
+
+                // Give money to winning town
+                double townMoney = defendingTown.getAccount().getHoldingBalance();
+                attackingTown.getAccount().deposit(townMoney, "Town conquered - All money is transferred");
+                attackingTown.save();
+                messageResident(attackingResident, ChatColor.GREEN + "Your town received " + townMoney + " coins " +
+                    "because it conquered the opposing town.");
+
+                // Give money to winning nation
+                double nationMoney = defendingNation.getAccount().getHoldingBalance();
+                attackingNation.getAccount().deposit(nationMoney, "Nation conquered - All money is transferred");
+                attackingNation.save();
+                messageResident(attackingResident, ChatColor.GREEN + "Your nation received " + nationMoney + " coins " +
+                    "because it conquered the opposing nation.");
+
+                TownyUniverse townyUniverse = TownyUniverse.getInstance();
+
+                // Disband defending town
+                townyUniverse.getDataSource().removeTown(defendingTown);
+
+                // Nation ownership transfer
+                if (!defendingNation.findNewCapital()) {
+                    // Disband defending nation
+                    TownyMessaging.sendGlobalMessage(Translatable.of("msg_del_nation", defendingNation.getName()));
+                    TownyUniverse.getInstance().getDataSource().removeNation(defendingNation);
+                }
+
+                return;
+            }
+
+            // VYKETYPE AUTHORSHIP END ------------------------------------------------------------------
+
             // Payments
             double amount = 0;
             String moneyTransferMessage = null;
@@ -200,12 +244,12 @@ public class FlagWarCustomListener implements Listener {
             // Event Message
             messageWon(cell, attackingResident, attackingNation);
 
-            // Money Transfer message.
+            // Money Transfer message
             if (TownyEconomyHandler.isActive() && amount != 0 && moneyTransferMessage != null) {
                 messageResident(attackingResident, moneyTransferMessage);
                 TownyMessaging.sendPrefixedTownMessage(defendingTown, moneyTransferMessage);
             }
-        } catch (NotRegisteredException e) {
+        } catch (TownyException e) {
             e.printStackTrace();
         }
     }
